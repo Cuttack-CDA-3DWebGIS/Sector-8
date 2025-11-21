@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Cuttack CDA Dashboard — Fixed (Blue buildings, Green divider roads, Drone above OSM, under vectors)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<!-- MapLibre -->
+<link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet"/>
+<script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- Mapbox GL Draw (optional; guarded) -->
+<link href="https://unpkg.com/@mapbox/mapbox-gl-draw@1.4.1/dist/mapbox-gl-draw.css" rel="stylesheet"/>
+<script src="https://unpkg.com/@mapbox/mapbox-gl-draw@1.4.1/dist/mapbox-gl-draw.js"></script>
+
+<!-- Turf (for measuring) -->
+<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:Segoe UI, Arial, sans-serif}
+  #container{display:flex;height:100vh;width:100vw;overflow:hidden}
+  #sidePanel{ width:360px;min-width:280px;padding:16px;box-sizing:border-box;
+    background:linear-gradient(180deg,#1a2332,#0f1419);color:#fff;overflow:auto;
+    border-right:1px solid rgba(255,255,255,0.1);box-shadow:2px 0 20px rgba(0,0,0,0.5);z-index:1100;}
+  #logoBox{width:56px;height:56px;background:#fff;border-radius:6px;overflow:hidden;margin-bottom:12px;display:flex;align-items:center;justify-content:center}
+  #logoBox img{max-width:100%;max-height:100%}
+  #map{flex:1;position:relative}
+  #rightPanel{ width:300px;min-width:220px;padding:14px;box-sizing:border-box;
+    background:linear-gradient(180deg,#1a2332,#0f1419);color:#fff;overflow:auto;
+    border-left:1px solid rgba(255,255,255,0.08);box-shadow:-2px 0 20px rgba(0,0,0,0.5); }
+  #rightPanel h2{color:#ffd700;margin:0 0 10px 0;text-align:center;font-size:18px}
+  #infoTitle{color:#ffd700;margin:6px 0 12px 0;font-weight:700}
+  table.infoTable{width:100%;border-collapse:collapse;font-size:13px}
+  table.infoTable td{padding:8px 6px;vertical-align:top}
+  td.key{width:40%;color:#ffd700;font-weight:700;padding-right:8px}
+  td.value{color:#fff}
+  .small-muted{font-size:12px;color:rgba(255,255,255,0.65);margin-top:8px;display:block}
+  #layersToggleBtn{ position:absolute; top:16px; right:16px; z-index:1200;
+    background:linear-gradient(135deg, rgba(26,35,50,0.95), rgba(15,20,25,0.95));
+    color:#ffd700; border:1px solid rgba(255,255,255,0.08); padding:8px 12px; border-radius:8px; cursor:pointer;
+    box-shadow:0 8px 32px rgba(0,0,0,0.4); font-weight:700; }
+  #layerList{ position:absolute; top:56px; right:16px; z-index:1200; display:none;
+    background:linear-gradient(180deg,#1a2332,#0f1419); padding:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.06);
+    box-shadow:0 12px 40px rgba(0,0,0,0.5); }
+  #layerList label{display:flex;align-items:center;gap:8px;color:#fff;padding:6px 0;cursor:pointer}
+  input[type=checkbox]{width:18px;height:18px;cursor:pointer;accent-color:#ffd700}
+  .searchRow{display:flex; gap:8px; align-items:center; margin-bottom:10px}
+  input[type=text]{flex:1;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#fff}
+  button.btnSearch{padding:10px 12px;border-radius:8px;border:none;background:#ffd700;color:#111;font-weight:700;cursor:pointer}
+  .stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .stat-card{background:linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);font-weight:700}
+  .chart-container{padding:10px;background:linear-gradient(135deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:10px;margin-bottom:12px}
+  .uiBtn{width:100%;padding:10px;border-radius:8px;border:none;margin:6px 0;font-weight:700;cursor:pointer}
+  #propertyBtn{background:linear-gradient(135deg,#ffd700,#ffed4e);color:#111}
+  #floodBtn{background:linear-gradient(135deg,#ff6b6b,#ee5a52);color:#fff}
+  #transferTypeBtn{background:linear-gradient(135deg,#51cf66,#37b24d);color:#fff}
+  #resetBtn{background:linear-gradient(135deg,#868e96,#495057);color:#fff}
+  #debugLog{background:rgba(0,0,0,0.3);padding:10px;border-radius:6px;margin-bottom:12px;font-size:11px;max-height:160px;overflow:auto;font-family:monospace}
+
+  /* Measure & Export UI */
+  .map-ui-row { position:absolute; left:16px; top:72px; z-index:1300; display:flex; gap:8px; }
+  .map-ui-btn {
+    background: #ffd700;
+    color: #111;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-weight:700;
+    cursor:pointer;
+    box-shadow:0 6px 18px rgba(0,0,0,0.25);
+  }
+  .map-ui-btn.secondary { background:#fff; color:#111; border:1px solid rgba(0,0,0,0.08); }
+  .measure-mode-indicator { position:absolute; left:16px; top:126px; z-index:1299; background: rgba(0,0,0,0.6); color:#fff; padding:6px 10px; border-radius:6px; font-size:13px; display:none; }
+  .measure-popup { position: absolute; top: 160px; left: 16px; z-index:1299; background: rgba(255,255,255,0.95); color:#111; padding:8px 10px; border-radius:6px; box-shadow:0 6px 18px rgba(0,0,0,0.25); display:none;}
+
+  @media (max-width:1200px){ #rightPanel{display:none} }
+
+  /* avoid draw control overlapping top UI — nudge draw controls down when they are in top-right */
+  .mapboxgl-ctrl-top-right { top: 56px !important; }
+  /* small spacing so the view toggle and draw don't clash */
+  #viewToggle { z-index:1400; }
+</style>
+</head>
+<body>
+<div id="container">
+  <div id="sidePanel">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div id="logoBox">
+        <!-- first try remote logo, fallback to uploaded local file per developer instruction -->
+        <img src="https://raw.githubusercontent.com/Cuttack-CDA-3DWebGIS/Sector-6_1/main/CDA_Logo.png" alt="logo" onerror="this.onerror=null; this.src='/mnt/data/0f271b21-a567-4624-a3b2-2635d2b1c983.png'">
+      </div>
+      <div>
+        <div style="color:#ffd700;font-weight:800">Cuttack CDA</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.7)">Sector 6 — Dashboard</div>
+      </div>
+    </div>
+
+    <div id="debugLog"></div>
+
+    <div class="searchRow">
+      <input id="searchBox" type="text" placeholder="🔍 Search Plot Number..." />
+      <button id="searchBtn" class="btnSearch">Search</button>
+    </div>
+
+    <div id="searchRow" style="display:none;margin-bottom:8px;">
+      <div class="small-muted" id="s_total_res">Residential: 0</div>
+      <div class="small-muted">Found: <span id="s_total_found">0</span></div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button id="prevMatchBtn" class="uiBtn" style="width:64px;background:#4aa8f0;color:#fff">Prev</button>
+        <button id="nextMatchBtn" class="uiBtn" style="width:64px;background:#4aa8f0;color:#fff">Next</button>
+      </div>
+    </div>
+
+    <div class="stats-grid" id="stats">
+      <div class="stat-card" id="s1">Starting...</div>
+      <div class="stat-card" id="s2"></div>
+      <div class="stat-card" id="s3"></div>
+      <div class="stat-card" id="s4"></div>
+      <div class="stat-card" id="s5"></div>
+    </div>
+
+    <div class="chart-container">
+      <canvas id="pieChart"></canvas>
+    </div>
+
+    <button class="uiBtn" id="propertyBtn">📊 Property Type Analysis</button>
+    <button class="uiBtn" id="floodBtn">🌊 Flood Effect Analysis</button>
+    <button class="uiBtn" id="transferTypeBtn">📋 Transfer Type Analysis</button>
+    <button class="uiBtn" id="resetBtn">🔄 Reset View</button>
+  </div>
+
+  <div id="map">
+    <div id="viewToggle" style="position:absolute;left:16px;top:16px;z-index:1400;display:flex;gap:8px">
+      <button id="view3D" class="uiBtn" style="width:90px;background:linear-gradient(135deg,#ffd700,#ffed4e);color:#111">3D</button>
+      <button id="view2D" class="uiBtn" style="width:90px">2D</button>
+    </div>
+
+    <button id="layersToggleBtn">🗺️ Layers</button>
+    <div id="layerList">
+      <label><input type="checkbox" id="toggleBuildings" checked> Buildings</label>
+      <label><input type="checkbox" id="toggleRoads" checked> Roads</label>
+      <label><input type="checkbox" id="toggleDrone"> Drone Image (optional)</label>
+      <label><input type="checkbox" id="toggleStreet" checked> Street Lights</label>
+    </div>
+  </div>
+
+  <div id="rightPanel" role="region" aria-label="Information">
+    <h2>Information</h2>
+    <div id="infoSection">
+      <div id="infoTitle">No feature selected</div>
+      <table class="infoTable" id="infoTable"></table>
+      <span class="small-muted" id="infoTypeLine">Click a building, road or street light to view details here.</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* logging helper */
+function log(msg){
+  try {
+    const logDiv=document.getElementById('debugLog');
+    const time=new Date().toLocaleTimeString();
+    logDiv.innerHTML+=`[${time}] ${msg}<br>`;
+    logDiv.scrollTop=logDiv.scrollHeight;
+  } catch(e){}
+  console.log(msg);
+}
+log('Script started');
+
+/* Globals */
+let buildingsGeo=null, buildingsData=null, currentField='Type_of_al', is3DView=true;
+let selectedFeature = null;
+
+// Colors/configs
+const DEFAULT_BUILDING_COLOR = '#36A2EB'; // blue
+const DEFAULT_ROAD_COLOR = '#ff0000'; // red
+
+const propertyColors = { 'Commercial':'#FF6384','Residential':'#36A2EB','Institutional':'#8AFF33','Mixed Use':'#FFCE56','Vacant':'#AA33FF' };
+const floodColors = { 'Yes':'#FF0000','No':'#00FF00' };
+const transferTypeColors = {
+  '3rd PARTY':'#FFB259',
+  'Blood Relation':'#e9967a',
+  'Inclusion Of Wife Name':'#7C4DFF',
+  'Not Transfer':'#708090',
+  'Succession Transfer':'#2e8b57',
+  'Other':'#888888'
+};
+const floorHeights = { 'GROUND FLOOR':3,'G+1':6,'G+2':9,'G+3':12,'G+4':15,'UNDER CONSTRUCTION':3,'VACANT PLOT':1 };
+
+/* Map init */
+const map = new maplibregl.Map({
+  container: 'map',
+  style: { version:8, sources:{}, layers:[] },
+  center:[85.84, 20.477],
+  zoom:17,
+  pitch:60,
+  bearing:-17.6
+});
+map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+log('Map created (empty style)');
+
+/* Guarded Draw init */
+/* place draw in top-right to avoid overlapping your Layers and 3D/2D controls */
+let draw = null;
+if (typeof MapboxDraw !== 'undefined') {
+  try {
+    draw = new MapboxDraw({ displayControlsDefault:false, controls:{ polygon:true, point:true, line_string:true, trash:true }});
+    map.addControl(draw,'top-right'); // moved to top-right to avoid overlap
+    log('Draw initialized (top-right)');
+  } catch(e){ log('Draw init fail: '+e.message); }
+} else log('MapboxDraw not loaded');
+
+/* helpers */
+function buildHeightExpression(){
+  return ['match',['get','Floors'],
+    'GROUND FLOOR', floorHeights['GROUND FLOOR'],
+    'G+1', floorHeights['G+1'],
+    'G+2', floorHeights['G+2'],
+    'G+3', floorHeights['G+3'],
+    'G+4', floorHeights['G+4'],
+    'UNDER CONSTRUCTION', floorHeights['UNDER CONSTRUCTION'],
+    'VACANT PLOT', floorHeights['VACANT PLOT'],
+    3
+  ];
+}
+async function fetchJSON(url){ log('Fetching: '+url); try{ const res=await fetch(url); if(!res.ok) throw new Error(res.status+' '+res.statusText); const data=await res.json(); log('✓ Loaded: '+(data.features?data.features.length:0)+' features'); return data; } catch(err){ log('✗ Error: '+err.message); throw err; } }
+
+function normalizeTransfer(v) {
+  if (!v) return 'Not Transfer';
+  const s = v.toString().trim();
+  const up = s.toUpperCase();
+  if (up.indexOf('3RD')>=0 || up.indexOf('3RD PARTY')>=0 || up.indexOf('AMALGAMATED')>=0) return '3rd PARTY';
+  if (up.indexOf('BLOOD')>=0) return 'Blood Relation';
+  if (up.indexOf('INCLUSION')>=0) return 'Inclusion Of Wife Name';
+  if (up.indexOf('SUCCESSION')>=0) return 'Succession Transfer';
+  if (up.indexOf('NOT')>=0) return 'Not Transfer';
+  return 'Other';
+}
+function normalizeFlood(v) { if (!v) return 'No'; const s = v.toString().trim().toUpperCase(); return s==='YES' ? 'Yes':'No'; }
+
+function getProp(obj, key) {
+  if (!obj) return null;
+  const alt = {
+    'OwnerName':['OwnerName','Owner','Owner_Name','Name'],
+    'FatherName':['FatherName','Father_Name','Father'],
+    'PlotNo':['PlotNo','Plotno','Plot_No','PLOTNO','Plot','PLOT'],
+    'Floors':['Floors','Floor','No_of_Floors'],
+    'Built_Area':['Built_Area','BuiltArea','Built_Area_sft','BuiltArea_sqft'],
+    'Type_of_al':['Type_of_al','Type_of_all','PropertyType'],
+    'Year_Commn':['Year_Commn','YearComm','Year'],
+    'Type_Trans':['Type_Trans','TypeTrans','TransferType'],
+    '1St_Transf':['1St_Transf','1st_Transf','First_Transf','FirstTransfer'],
+    '2nd_Transf':['2nd_Transf','Second_Transf','SecondTransfer'],
+    '3rd_Transf':['3rd_Transf','Third_Transf','ThirdTransfer'],
+    'HoldingNo':['HoldingNo','Holding_No','Holding'],
+    'MobileNo':['MobileNo','Mobile_No','Phone','PhoneNo'],
+    'Flood_Effe':['Flood_Effe','FloodEffect','Flood_Effected'],
+    'Status_Tra':['Status_Tra','Status_Trans','Transfer_Status'],
+    'Width':['Width','width'],
+    'Layer':['Layer','layer'],
+    'Type':['Type','type'],
+    'Location':['Location','location']
+  };
+  const tryKeys = alt[key] || [key, key.toUpperCase(), key.toLowerCase()];
+  for (const k of tryKeys) if (Object.prototype.hasOwnProperty.call(obj,k) && obj[k] !== null && obj[k] !== undefined && obj[k] !== '') return obj[k];
+  for (const k in obj) if (k.toLowerCase() === key.toLowerCase() && obj[k] !== '') return obj[k];
+  return null;
+}
+
+/* Fields / UI helpers */
+const buildingFields = [
+  ['OwnerName','Owner Name'],['FatherName','Father / Guardian'],['PlotNo','Plot No'],['Floors','Floors'],
+  ['Built_Area','Built Area (sqft)'],['Type_of_al','Property Type'],['Year_Commn','Year of Commencement of Ownership'],
+  ['Type_Trans','Transfer Type'],['1St_Transf','First Transfer To'],['2nd_Transf','Second Transfer To'],
+  ['3rd_Transf','Third Transfer To'],['HoldingNo','Holding Number'],['MobileNo','Mobile Number'],
+  ['Flood_Effe','Flood Effected'],['Status_Tra','Transfer Status']
+];
+const roadFields = [['Width','Width'], ['Layer','Layer']];
+const streetFields = [['Type','Type'], ['Location','Location']];
+
+function fillRightPanel(type, props) {
+  const title = document.getElementById('infoTitle');
+  const table = document.getElementById('infoTable');
+  const infoTypeLine = document.getElementById('infoTypeLine');
+  table.innerHTML = '';
+  let fields = [];
+  if (type === 'building') { fields = buildingFields; title.textContent = 'Building Details'; infoTypeLine.textContent = 'Layer: BUILDING'; }
+  else if (type === 'road') { fields = roadFields; title.textContent = 'Road Details'; infoTypeLine.textContent = 'Layer: ROAD'; }
+  else if (type === 'street') { fields = streetFields; title.textContent = 'Street Light Details'; infoTypeLine.textContent = 'Layer: STREET LIGHT'; }
+  else { title.textContent = 'Information'; infoTypeLine.textContent = ''; }
+  for (const [key,label] of fields) {
+    let val = getProp(props, key);
+    if (key === 'Type_Trans') val = normalizeTransfer(val);
+    if (key === 'Flood_Effe') val = normalizeFlood(val);
+    const tr = document.createElement('tr');
+    const tdKey = document.createElement('td'); tdKey.className='key'; tdKey.textContent = label;
+    const tdVal = document.createElement('td'); tdVal.className='value'; tdVal.textContent = val !== null && val !== undefined && val !== '' ? String(val) : 'N/A';
+    tr.appendChild(tdKey); tr.appendChild(tdVal); table.appendChild(tr);
+  }
+}
+
+/* selection highlight */
+function clearSelectedFeature() {
+  selectedFeature = null;
+  const src = map.getSource('selected-feature');
+  if (src) src.setData({ type:'FeatureCollection', features:[] });
+  if (map.getLayer('selected-feature-fill')) map.setLayoutProperty('selected-feature-fill','visibility','none');
+  if (map.getLayer('selected-feature-line')) map.setLayoutProperty('selected-feature-line','visibility','none');
+  if (map.getLayer('selected-feature-point')) map.setLayoutProperty('selected-feature-point','visibility','none');
+}
+function setSelectedFeature(feat) {
+  if (!feat) { clearSelectedFeature(); return; }
+  selectedFeature = feat;
+  const src = map.getSource('selected-feature'); if (src) src.setData({ type:'FeatureCollection', features:[feat] });
+  const g = feat.geometry && feat.geometry.type;
+  if (g === 'Point' || g === 'MultiPoint') {
+    if (map.getLayer('selected-feature-point')) map.setLayoutProperty('selected-feature-point','visibility','visible');
+    if (map.getLayer('selected-feature-line')) map.setLayoutProperty('selected-feature-line','visibility','none');
+    if (map.getLayer('selected-feature-fill')) map.setLayoutProperty('selected-feature-fill','visibility','none');
+  } else if (g === 'LineString' || g === 'MultiLineString') {
+    if (map.getLayer('selected-feature-line')) map.setLayoutProperty('selected-feature-line','visibility','visible');
+    if (map.getLayer('selected-feature-point')) map.setLayoutProperty('selected-feature-point','visibility','none');
+    if (map.getLayer('selected-feature-fill')) map.setLayoutProperty('selected-feature-fill','visibility','none');
+  } else {
+    if (map.getLayer('selected-feature-fill')) {
+      map.setLayoutProperty('selected-feature-fill','visibility','visible');
+      map.setPaintProperty('selected-feature-fill','fill-extrusion-height', is3DView ? buildHeightExpression() : 0);
+    }
+    if (map.getLayer('selected-feature-line')) map.setLayoutProperty('selected-feature-line','visibility','none');
+    if (map.getLayer('selected-feature-point')) map.setLayoutProperty('selected-feature-point','visibility','none');
+  }
+}
+
+/* Robust move: place drone above rasters (like osm) and below vectors */
+function moveDroneUnderVectors() {
+  try {
+    const styleLayers = map.getStyle().layers || [];
+
+    // find first non-raster (vector) layer other than drone
+    const firstVector = styleLayers.find(l => l.type && l.type !== 'raster' && l.id !== 'drone');
+
+    if (firstVector) {
+      // move 'drone' to just BEFORE the first vector layer (so vectors render above drone)
+      try { map.moveLayer('drone', firstVector.id); log('Moved drone before first vector layer: ' + firstVector.id); } catch(e){ log('moveLayer fail (drone before vector): '+e.message); }
+    } else {
+      log('No vector layer found to position drone before.');
+    }
+
+    // ensure OSM raster is below drone: move 'osm' to be before 'drone' if osm exists
+    if (map.getLayer('osm')) {
+      try {
+        map.moveLayer('osm', 'drone');
+        log('Moved osm before drone so drone renders above osm.');
+      } catch (err) {
+        log('Could not move osm before drone: ' + (err && err.message ? err.message : err));
+      }
+    }
+  } catch (err) {
+    log('moveDroneUnderVectors failed: ' + (err && err.message ? err.message : err));
+  }
+}
+
+/* Single map.on('load') – add rasters & vectors, ensure drone under vectors */
+map.on('load', async () => {
+  try {
+    // OSM raster
+    try {
+      map.addSource('osm', { type:'raster', tiles:[ 'https://tile.openstreetmap.org/{z}/{x}/{y}.png' ], tileSize:256 });
+      map.addLayer({ id:'osm', type:'raster', source:'osm', paint:{ 'raster-opacity':1 } });
+      log('OSM raster added.');
+    } catch(e){ log('OSM add failed: '+e.message); }
+
+    // Drone raster (guarded) – add hidden by default; set raster-opacity to 1 for a clean raster
+    try {
+      map.addSource('drone', { type:'raster', tiles:[ 'https://api.maptiler.com/tiles/019aa60b-4835-7f92-a8ce-411db2f3d268/{z}/{x}/{y}.webp?key=gf1oWeUNvdnVmrm4Zfeg' ], tileSize:256 });
+      map.addLayer({ id:'drone', type:'raster', source:'drone', paint: { 'raster-opacity': 1 } });
+      map.setLayoutProperty('drone','visibility','none'); // hidden initially
+      log('Drone raster added (hidden).');
+    } catch(e){ log('Drone add skipped: '+e.message); }
+
+    // load vector geojsons
+    const bUrl = 'https://raw.githubusercontent.com/Cuttack-CDA-3DWebGIS/Sector-8/main/Sec8_Buildings.geojson';
+    const rUrl = 'https://raw.githubusercontent.com/Cuttack-CDA-3DWebGIS/Sector-8/main/Sec8_Road.geojson';
+    const sUrl = 'https://raw.githubusercontent.com/Cuttack-CDA-3DWebGIS/Sector-8/main/Sec8_Street_Light.geojson';
+	const boundaryUrl = 'https://raw.githubusercontent.com/hemanya2003/CDA/main/CDA_Boundary.geojson'; // unchanged
+
+    buildingsGeo = await fetchJSON(bUrl);
+    const roadsGeo = await fetchJSON(rUrl);
+    const streetGeo = await fetchJSON(sUrl);
+	const boundaryData = await fetch(boundaryUrl).then(res => res.json());
+    buildingsData = buildingsGeo;
+
+    map.addSource('buildings', { type:'geojson', data: buildingsGeo });
+    map.addSource('roads', { type:'geojson', data: roadsGeo });
+    map.addSource('streetlights', { type:'geojson', data: streetGeo });
+
+    // --- NEW 3D ROADS (for polygon road layer) ---
+    try {
+      if (map.getLayer('roads-fill')) map.setLayoutProperty('roads-fill', 'visibility', 'none');
+      if (map.getLayer('roads-line')) map.setLayoutProperty('roads-line', 'visibility', 'none');
+    } catch(e){}
+
+    const ROAD_COLORS = {
+      'Road': '#ff0000',
+      'Divider': '#00FF00'  // divider green as requested
+    };
+
+    const ROAD_HEIGHTS = {
+      'Road': 0.10,     // 10 cm height
+      'Divider': 0.50   // Divider higher than road
+    };
+
+    const DEFAULT_ROAD_COLOR = '#ff0000';
+    const DEFAULT_ROAD_HEIGHT = 0.10;
+
+    map.addLayer({
+      id: 'roads-3d',
+      type: 'fill-extrusion',
+      source: 'roads',
+      paint: {
+        'fill-extrusion-height': [
+          'match',
+          ['get','Layer'],
+          'Divider', ROAD_HEIGHTS['Divider'],
+          'Road', ROAD_HEIGHTS['Road'],
+          DEFAULT_ROAD_HEIGHT
+        ],
+        'fill-extrusion-base': 0,
+        'fill-extrusion-color': [
+          'match',
+          ['get','Layer'],
+          'Divider', ROAD_COLORS['Divider'],
+          'Road', ROAD_COLORS['Road'],
+          DEFAULT_ROAD_COLOR
+        ],
+        'fill-extrusion-opacity': 0.95,
+        'fill-extrusion-vertical-gradient': false
+      }
+    });
+
+    // street lights (add after roads so points render above road fill)
+    map.addLayer({
+      id:'street-point', type:'circle', source:'streetlights',
+      paint:{ 'circle-radius':6, 'circle-color':'#FFD700', 'circle-stroke-color':'#fff', 'circle-stroke-width':1, 'circle-pitch-alignment':'map' }
+    });
+
+    // buildings 3d (add buildings after roads so you can control order if you want)
+    map.addLayer({
+      id:'buildings-3d', type:'fill-extrusion', source:'buildings',
+      paint:{
+        'fill-extrusion-color': DEFAULT_BUILDING_COLOR,        // uniform blue for all buildings
+        'fill-extrusion-height': buildHeightExpression(),
+        'fill-extrusion-opacity': 0.85
+      }
+    });
+	    // BOUNDARY (unchanged)
+    map.addSource('boundary', { type: 'geojson', data: boundaryData });
+    map.addLayer({
+      id: 'boundary-extrusion',
+      type: 'fill-extrusion',
+      source: 'boundary',
+      paint: {
+        'fill-extrusion-color': 'rgba(0,0,0,0)',
+        'fill-extrusion-height': 20,
+        'fill-extrusion-opacity': 0
+      }
+    });
+    map.addLayer({
+      id: 'boundary-line',
+      type: 'line',
+      source: 'boundary',
+      paint: {
+        'line-color': 'brown',
+        'line-width': 8
+      }
+    });
+
+    // selected feature source + highlight layers (hidden by default)
+    map.addSource('selected-feature', { type:'geojson', data: { type:'FeatureCollection', features: [] } });
+    map.addLayer({ id:'selected-feature-fill', type:'fill-extrusion', source:'selected-feature',
+      paint:{ 'fill-extrusion-color':'#ff0000', 'fill-extrusion-height': buildHeightExpression(), 'fill-extrusion-opacity':0.95 },
+      layout:{ 'visibility':'none' }
+    });
+    map.addLayer({ id:'selected-feature-line', type:'line', source:'selected-feature', paint:{ 'line-color':'#ff0000','line-width':4 }, layout:{ 'visibility':'none' }});
+    map.addLayer({ id:'selected-feature-point', type:'circle', source:'selected-feature', paint:{ 'circle-radius':8,'circle-color':'#ff0000','circle-stroke-color':'#fff','circle-stroke-width':1 }, layout:{ 'visibility':'none' }});
+
+    // After adding vector layers, ensure drone is positioned correctly (above osm, under vectors)
+    if (map.getLayer('drone')) {
+      moveDroneUnderVectors();
+    }
+
+    log('✓✓✓ ALL LAYERS ADDED ✓✓✓');
+    updateDashboard(buildingsGeo.features,'Type_of_al');
+    updatePrimaryStat('Type_of_al', null);
+    updateTotalResidential();
+    document.getElementById('s1').textContent = `✓ ${buildingsGeo.features.length} buildings loaded`;
+
+  } catch (err) {
+    log('Map load error: ' + (err && err.message ? err.message : err));
+  }
+});
+
+/* cursor hover
+   NOTE: use 'roads-3d' in the layer list so hover/click picks up 3D roads */
+map.on('mousemove', (e) => {
+  const f = map.queryRenderedFeatures(e.point, { layers:['buildings-3d','roads-3d','street-point'] });
+  map.getCanvas().style.cursor = (f && f.length) ? 'pointer' : '';
+});
+
+/* click behavior
+   Use 'roads-3d' so the fill-extrusion selection works */
+map.on('click', (e) => {
+  const b = map.queryRenderedFeatures(e.point, { layers:['buildings-3d'] })[0];
+  if (b) { fillRightPanel('building', b.properties||{}); setSelectedFeature({ type:'Feature', geometry:b.geometry, properties:b.properties}); document.getElementById('searchRow').style.display='none'; document.getElementById('s_total_res').style.display=''; return; }
+  const rd = map.queryRenderedFeatures(e.point, { layers:['roads-3d'] })[0];
+  if (rd) { fillRightPanel('road', rd.properties||{}); setSelectedFeature({ type:'Feature', geometry:rd.geometry, properties:rd.properties}); document.getElementById('searchRow').style.display='none'; document.getElementById('s_total_res').style.display=''; return; }
+  const st = map.queryRenderedFeatures(e.point, { layers:['street-point'] })[0];
+  if (st) { fillRightPanel('street', st.properties||{}); setSelectedFeature({ type:'Feature', geometry:st.geometry, properties:st.properties}); document.getElementById('searchRow').style.display='none'; document.getElementById('s_total_res').style.display=''; return; }
+});
+
+/* ESC clears */
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' || ev.key === 'Esc') {
+    document.getElementById('infoTitle').textContent='No feature selected';
+    document.getElementById('infoTable').innerHTML='';
+    document.getElementById('infoTypeLine').textContent='Click a building, road or street light to view details here.';
+    clearSelectedFeature();
+    document.getElementById('searchBox').value='';
+    document.getElementById('searchRow').style.display='none';
+    document.getElementById('s_total_res').style.display='';
+    if (buildingsData) updateDashboard(buildingsData.features, currentField);
+    window.searchMatches=[]; window.currentMatchIdx=0;
+    // Clear measure layers if any
+    try { if (map.getSource('measure-temp-source')) map.getSource('measure-temp-source').setData({ type:'FeatureCollection', features:[] }); } catch(e){}
+  }
+});
+
+/* SEARCH logic */
+window.searchMatches=[]; window.currentMatchIdx=0;
+function getPlotPropertyValue(props){ return (props.PlotNo||props.Plotno||props.Plot_No||props.PLOTNO||props.Plot||'').toString(); }
+
+function showMatch(index) {
+  const matches = window.searchMatches||[];
+  if (!matches || matches.length===0){ document.getElementById('searchRow').style.display='none'; updatePrimaryStat(currentField,{}); return; }
+  index = ((index % matches.length)+matches.length)%matches.length;
+  window.currentMatchIdx = index;
+  const feat = matches[index];
+  if (!feat) return;
+  const props = feat.properties||{};
+  if (props.Type_of_al||props.OwnerName||props.PlotNo) fillRightPanel('building', props);
+  else if (props.Width||props.Layer) fillRightPanel('road', props);
+  else if (props.Type||props.Location) fillRightPanel('street', props);
+  else fillRightPanel('building', props);
+  setSelectedFeature(feat);
+  const foundCountEl = document.getElementById('s_total_found'); if (foundCountEl) foundCountEl.textContent = `${matches.length}`;
+  document.getElementById('searchRow').style.display='flex';
+  const resEl = document.getElementById('s_total_res'); if (resEl) resEl.style.display='none';
+  // fly
+  let center=null;
+  if (feat.geometry) {
+    const g=feat.geometry;
+    if (g.type==='Point') center=g.coordinates;
+    else if (g.type==='Polygon') center=g.coordinates[0][0];
+    else if (g.type==='MultiPolygon') center=g.coordinates[0][0][0];
+    else if (g.type==='LineString') center=g.coordinates[Math.floor(g.coordinates.length/2)];
+  }
+  if (center) map.flyTo({ center, zoom:19, pitch:is3DView?60:0, bearing:is3DView?-17.6:0, duration:900 });
+}
+
+function performSearch(query) {
+  if (!buildingsData){ log('No data for search'); return; }
+  const q = (query||'').toString().trim().toUpperCase();
+  if (q===''){ window.searchMatches=[]; window.currentMatchIdx=0; document.getElementById('searchRow').style.display='none'; const resEl=document.getElementById('s_total_res'); if(resEl) resEl.style.display=''; updateDashboard(buildingsData.features, currentField); clearSelectedFeature(); return;}
+  const found = (buildingsData.features||[]).filter(f => (getPlotPropertyValue(f.properties)||'').toString().toUpperCase().includes(q));
+  window.searchMatches = found; window.currentMatchIdx=0;
+  const resEl=document.getElementById('s_total_res'); if(resEl) resEl.style.display='none';
+  const foundCountEl=document.getElementById('s_total_found'); if(foundCountEl) foundCountEl.textContent = `${found.length}`;
+  document.getElementById('searchRow').style.display='flex';
+  if (found.length===0){ document.getElementById('infoTitle').textContent='No feature selected'; document.getElementById('infoTable').innerHTML=''; document.getElementById('infoTypeLine').textContent='No matches found'; clearSelectedFeature(); return;}
+  showMatch(0);
+}
+
+document.getElementById('searchBox').addEventListener('keyup', function(e){ if(e.key==='Enter') performSearch(this.value); });
+document.getElementById('searchBtn').addEventListener('click', () => performSearch(document.getElementById('searchBox').value));
+let searchDebounce; document.getElementById('searchBox').addEventListener('input', function(){ clearTimeout(searchDebounce); searchDebounce=setTimeout(()=>performSearch(this.value),600); });
+document.getElementById('prevMatchBtn').addEventListener('click', ()=>{ if(window.searchMatches&&window.searchMatches.length>0) showMatch(window.currentMatchIdx-1); });
+document.getElementById('nextMatchBtn').addEventListener('click', ()=>{ if(window.searchMatches&&window.searchMatches.length>0) showMatch(window.currentMatchIdx+1); });
+
+/* Chart */
+const pieCtx = document.getElementById('pieChart').getContext('2d');
+const pieChart = new Chart(pieCtx, {
+  type:'pie',
+  data:{ labels:[], datasets:[{ data:[], backgroundColor:[] }] },
+  options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom', labels:{ color:'#fff', padding:12, font:{ size:11 } } } } }
+});
+
+/* Dashboard helpers */
+function updateDashboard(features, field) {
+  if (!features) return;
+  currentField = field;
+  const counts = {};
+  features.forEach(f => {
+    let v = f.properties[field];
+    if (field === 'Type_Trans') v = normalizeTransfer(v);
+    if (field === 'Flood_Effe') v = normalizeFlood(v);
+    if (v) counts[v] = (counts[v] || 0) + 1;
+  });
+  const labels = Object.keys(counts);
+  const values = Object.values(counts);
+  let colors = [];
+  if (field === 'Type_of_al') colors = labels.map(l => propertyColors[l] || '#888');
+  if (field === 'Flood_Effe') colors = labels.map(l => floodColors[l] || '#888');
+  if (field === 'Type_Trans') colors = labels.map(l => transferTypeColors[l] || transferTypeColors['Other']);
+
+  pieChart.data.labels = labels;
+  pieChart.data.datasets[0].data = values;
+  pieChart.data.datasets[0].backgroundColor = colors;
+  pieChart.update();
+
+  document.getElementById('s1').textContent = labels[0] ? `${labels[0]}: ${values[0]}` : '';
+  document.getElementById('s2').textContent = labels[1] ? `${labels[1]}: ${values[1]}` : '';
+  document.getElementById('s3').textContent = labels[2] ? `${labels[2]}: ${values[2]}` : '';
+  document.getElementById('s4').textContent = labels[3] ? `${labels[3]}: ${values[3]}` : '';
+  document.getElementById('s5').textContent = labels[4] ? `${labels[4]}: ${values[4]}` : '';
+
+  updatePrimaryStat(field, counts);
+}
+
+function updatePrimaryStat(field, countsObj) {
+  const counts = countsObj || {};
+  const el = document.getElementById('s_total_res'); if (!el) return;
+  if (field === 'Type_of_al') {
+    if (Object.keys(counts).length === 0) {
+      const total = (buildingsData && buildingsData.features) ? buildingsData.features.reduce((acc, f) => ((f.properties.Type_of_al||'').toString().toLowerCase()==='residential' ? acc+1 : acc), 0) : 0;
+      el.textContent = `Residential: ${total}`; return;
+    }
+    const residential = counts['Residential'] || counts['residential'] || 0;
+    el.textContent = `Residential: ${residential}`; return;
+  }
+  updatePrimaryStat('Type_of_al', {});
+}
+
+function updateTotalResidential() {
+  const totalEl = document.getElementById('s_total_res');
+  if (!totalEl || !buildingsData) return;
+  const total = buildingsData.features.reduce((acc,f)=> ((f.properties.Type_of_al||'').toString().toLowerCase()==='residential' ? acc+1 : acc), 0);
+  totalEl.textContent = `Residential: ${total}`;
+}
+
+/* UI Buttons */
+document.getElementById('propertyBtn').addEventListener('click', ()=>{ if(!buildingsData) return; updateDashboard(buildingsData.features,'Type_of_al'); highlightBuildingsByField('Type_of_al'); });
+document.getElementById('floodBtn').addEventListener('click', ()=>{ if(!buildingsData) return; updateDashboard(buildingsData.features,'Flood_Effe'); highlightBuildingsByField('Flood_Effe'); });
+document.getElementById('transferTypeBtn').addEventListener('click', ()=>{ if(!buildingsData) return; updateDashboard(buildingsData.features,'Type_Trans'); highlightBuildingsByField('Type_Trans'); });
+
+function highlightBuildingsByField(field) {
+  if (!map.getLayer('buildings-3d')) return;
+  // If no field passed or unknown field, revert to default
+  if (!field) {
+    map.setPaintProperty('buildings-3d','fill-extrusion-color', DEFAULT_BUILDING_COLOR);
+    return;
+  }
+  const expr = ['match', ['get', field]];
+  if (field === 'Type_of_al') {
+    Object.keys(propertyColors).forEach(k => expr.push(k, propertyColors[k]));
+    expr.push('#888888');
+  } else if (field === 'Flood_Effe') {
+    Object.keys(floodColors).forEach(k => expr.push(k, floodColors[k]));
+    expr.push('#888888');
+  } else if (field === 'Type_Trans') {
+    Object.keys(transferTypeColors).forEach(k => expr.push(k, transferTypeColors[k]));
+    expr.push('#888888');
+  } else {
+    expr.push(DEFAULT_BUILDING_COLOR);
+  }
+  map.setPaintProperty('buildings-3d','fill-extrusion-color', expr);
+}
+
+/* 2D/3D toggle */
+document.getElementById('view3D').addEventListener('click', ()=> {
+  if (!is3DView) {
+    is3DView = true; map.easeTo({ pitch:60, bearing:-17.6, duration:1000 });
+    if (map.getLayer('buildings-3d')) map.setPaintProperty('buildings-3d','fill-extrusion-height', buildHeightExpression());
+    if (map.getLayer('selected-feature-fill')) map.setPaintProperty('selected-feature-fill','fill-extrusion-height', buildHeightExpression());
+  }
+});
+document.getElementById('view2D').addEventListener('click', ()=> {
+  if (is3DView) {
+    is3DView = false; map.easeTo({ pitch:0, bearing:0, duration:1000 });
+    if (map.getLayer('buildings-3d')) map.setPaintProperty('buildings-3d','fill-extrusion-height', 0);
+    if (map.getLayer('selected-feature-fill')) map.setPaintProperty('selected-feature-fill','fill-extrusion-height', 0);
+  }
+});
+
+/* Reset */
+document.getElementById('resetBtn').addEventListener('click', ()=> {
+  map.easeTo({ center:[85.84,20.477], zoom:17, pitch:60, bearing:-17.6, duration:800 });
+  if (map.getLayer('buildings-3d')) {
+    map.setPaintProperty('buildings-3d','fill-extrusion-color', DEFAULT_BUILDING_COLOR);
+    map.setPaintProperty('buildings-3d','fill-extrusion-height', buildHeightExpression());
+  }
+  // we use roads-3d so update its paint if present
+  if (map.getLayer('roads-3d')) {
+    // reset fill-extrusion-color to default expression (keep Divider green)
+    map.setPaintProperty('roads-3d','fill-extrusion-color', [
+      'match',
+      ['get','LAYER'],
+      'Divider', '#00FF00',
+      'Road', '#ff0000',
+      '#ff0000'
+    ]);
+    map.setPaintProperty('roads-3d','fill-extrusion-height', [
+      'match',
+      ['get','LAYER'],
+      'Divider', 0.20,
+      'Road', 0.10,
+      0.10
+    ]);
+  }
+  // restore drone opacity (if present)
+  try { if (map.getLayer('drone')) map.setPaintProperty('drone','raster-opacity',1); } catch(e){}
+  updateDashboard(buildingsData.features, 'Type_of_al');
+  document.getElementById('searchBox').value=''; document.getElementById('searchRow').style.display='none'; document.getElementById('s_total_res').style.display='';
+  clearSelectedFeature();
+  try { if(draw) draw.deleteAll(); } catch(e){}
+});
+
+/* Layer toggles */
+// open/close list
+document.getElementById('layersToggleBtn').addEventListener('click', ()=>{ const el=document.getElementById('layerList'); el.style.display = el.style.display==='block' ? 'none' : 'block'; });
+
+// buildings
+document.getElementById('toggleBuildings').addEventListener('change', function(){ const v=this.checked?'visible':'none'; if(map.getLayer('buildings-3d')) map.setLayoutProperty('buildings-3d','visibility',v); if(v==='none'){ clearSelectedFeature(); document.getElementById('searchRow').style.display='none'; document.getElementById('s_total_res').style.display=''; } });
+
+// roads toggle (affects roads-3d)
+document.getElementById('toggleRoads').addEventListener('change', function(){ const v=this.checked?'visible':'none'; if(map.getLayer('roads-3d')) map.setLayoutProperty('roads-3d','visibility',v); });
+
+// street lights
+document.getElementById('toggleStreet').addEventListener('change', function(){ const v=this.checked?'visible':'none'; if(map.getLayer('street-point')) map.setLayoutProperty('street-point','visibility',v); });
+
+// drone toggle: ensure drone stays under vector layers and display raster clean (opaque)
+document.getElementById('toggleDrone').addEventListener('change', function(){
+  const checkbox = this;
+  if (!map.getLayer('drone')) { alert('Drone raster not available (tile URL may be unreachable).'); checkbox.checked = false; return; }
+  const vis = checkbox.checked ? 'visible' : 'none';
+  map.setLayoutProperty('drone','visibility', vis);
+
+  if (checkbox.checked) {
+    // ensure drone raster is fully opaque (clean)
+    try { map.setPaintProperty('drone','raster-opacity', 1); } catch (e) { /* ignore */ }
+
+    // Move drone under vectors and above rasters (robust)
+    moveDroneUnderVectors();
+  }
+});
+
+/* keep data in sync if source updates */
+map.on('sourcedata', (e)=> {
+  if (e.sourceId==='buildings' && e.isSourceLoaded) {
+    try { const src=map.getSource('buildings'); if(src && src._data){ buildingsData=src._data; updateTotalResidential(); updatePrimaryStat(currentField, {}); } } catch(err){}
+  }
+});
+
+log('Script ready.');
+
+/* =========================
+   MEASURE + EXPORT / PRINT
+   (Drop-in UI & logic)
+   ========================= */
+
+/* ---------- MEASURE + EXPORT / PRINT TOOL ---------- */
+/* UI creation: a small control row */
+(function addMeasureExportUI(){
+  const mapContainer = document.getElementById('map');
+
+  // container for buttons
+  const uiRow = document.createElement('div');
+  uiRow.className = 'map-ui-row';
+  uiRow.innerHTML = `
+    <button id="measureToggle" class="map-ui-btn">Measure</button>
+    <button id="measureDist" class="map-ui-btn secondary">Distance</button>
+    <button id="measureArea" class="map-ui-btn secondary">Area</button>
+    <button id="exportPNG" class="map-ui-btn">Export PNG</button>
+  `;
+  mapContainer.appendChild(uiRow);
+
+  // indicator & popup
+  const indicator = document.createElement('div');
+  indicator.className = 'measure-mode-indicator';
+  indicator.id = 'measureIndicator';
+  indicator.textContent = 'Measure mode: Click to add points — double-click or "Finish" to complete';
+  mapContainer.appendChild(indicator);
+
+  const resultBox = document.createElement('div');
+  resultBox.className = 'measure-popup';
+  resultBox.id = 'measureResult';
+  mapContainer.appendChild(resultBox);
+})();
+
+/* measure state */
+let measureActive = false;
+let measureMode = 'distance'; // 'distance' or 'area'
+let measureCoords = []; // array of [lng,lat]
+let measureTempId = 'measure-temp-source';
+
+/* helper: ensure source/layer exist (temporary) */
+function ensureMeasureLayers() {
+  if (!map.getSource(measureTempId)) {
+    map.addSource(measureTempId, { type:'geojson', data: { type:'FeatureCollection', features: [] } });
+    // line for distance
+    map.addLayer({ id: 'measure-line', type: 'line', source: measureTempId, paint:{ 'line-color':'#000', 'line-width':3 }, layout:{ 'visibility':'visible' } });
+    // fill for area
+    map.addLayer({ id: 'measure-fill', type: 'fill', source: measureTempId, paint:{ 'fill-color':'#000', 'fill-opacity':0.15 }, layout:{ 'visibility':'visible' } });
+    // points
+    map.addLayer({ id:'measure-points', type:'circle', source:measureTempId, paint:{ 'circle-radius':5, 'circle-color':'#000' } });
+  }
+}
+
+/* draw measure geometry to map */
+function updateMeasureDisplay() {
+  ensureMeasureLayers();
+  const fc = { type:'FeatureCollection', features:[] };
+  if (measureCoords.length === 0) {
+    map.getSource(measureTempId).setData(fc);
+    return;
+  }
+  // points feature
+  fc.features.push({ type:'Feature', geometry:{ type:'MultiPoint', coordinates: measureCoords }, properties:{} });
+
+  if (measureMode === 'distance') {
+    if (measureCoords.length >= 2) {
+      fc.features.push({ type:'Feature', geometry:{ type:'LineString', coordinates: measureCoords }, properties:{} });
+    }
+    // hide fill
+    if (map.getLayer('measure-fill')) map.setLayoutProperty('measure-fill','visibility','none');
+  } else { // area
+    if (measureCoords.length >= 3) {
+      // polygon requires closed ring
+      const polyCoords = measureCoords.slice();
+      if (polyCoords[0][0] !== polyCoords[polyCoords.length-1][0] || polyCoords[0][1] !== polyCoords[polyCoords.length-1][1]) {
+        polyCoords.push(polyCoords[0]);
+      }
+      fc.features.push({ type:'Feature', geometry:{ type:'Polygon', coordinates: [ polyCoords ] }, properties:{} });
+    }
+    if (map.getLayer('measure-fill')) map.setLayoutProperty('measure-fill','visibility', measureCoords.length >= 3 ? 'visible' : 'none');
+  }
+
+  map.getSource(measureTempId).setData(fc);
+}
+
+/* compute measurement and show result */
+function finalizeMeasurement() {
+  const resultEl = document.getElementById('measureResult');
+  if (measureCoords.length < 2) {
+    resultEl.style.display = 'block';
+    resultEl.textContent = 'Not enough points to measure.';
+    setTimeout(()=> resultEl.style.display='none', 2200);
+    return;
+  }
+  if (measureMode === 'distance') {
+    const line = turf.lineString(measureCoords);
+    let lengthKm = turf.length(line, { units: 'kilometers' });
+    const text = (lengthKm < 1) ? `${Math.round(lengthKm * 1000)} m` : `${lengthKm.toFixed(3)} km`;
+    resultEl.style.display = 'block';
+    resultEl.textContent = `Distance: ${text}`;
+  } else {
+    const polyCoords = measureCoords.slice();
+    if (polyCoords[0][0] !== polyCoords[polyCoords.length-1][0] || polyCoords[0][1] !== polyCoords[polyCoords.length-1][1]) {
+      polyCoords.push(polyCoords[0]);
+    }
+    const areaPoly = turf.polygon([polyCoords]);
+    const areaM2 = turf.area(areaPoly);
+    let text;
+    if (areaM2 >= 1000000) text = (areaM2/1000000).toFixed(3) + ' km²';
+    else if (areaM2 >= 10000) text = (areaM2/10000).toFixed(3) + ' ha';
+    else text = Math.round(areaM2) + ' m²';
+    resultEl.style.display = 'block';
+    resultEl.textContent = `Area: ${text}`;
+  }
+}
+
+/* handlers */
+function startMeasure() {
+  measureActive = true;
+  measureCoords = [];
+  updateMeasureDisplay();
+  document.getElementById('measureIndicator').style.display = 'block';
+  document.getElementById('measureIndicator').textContent = `Measure mode (${measureMode}). Click to add points. Double-click to finish.`;
+  map.getCanvas().style.cursor = 'crosshair';
+}
+function stopMeasure() {
+  measureActive = false;
+  document.getElementById('measureIndicator').style.display = 'none';
+  map.getCanvas().style.cursor = '';
+}
+
+/* add event listeners for map clicks while measuring */
+map.on('dblclick', (e) => {
+  if (!measureActive) return;
+  finalizeMeasurement();
+  e.preventDefault();
+  e.originalEvent && e.originalEvent.stopPropagation && e.originalEvent.stopPropagation();
+});
+
+map.on('click', (e) => {
+  if (!measureActive) return;
+  const c = [e.lngLat.lng, e.lngLat.lat];
+  measureCoords.push(c);
+  updateMeasureDisplay();
+});
+
+/* keyboard: ESC clears */
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' || ev.key === 'Esc') {
+    measureCoords = [];
+    try { if (map.getSource(measureTempId)) map.getSource(measureTempId).setData({ type:'FeatureCollection', features: [] }); } catch(e){}
+    stopMeasure();
+    document.getElementById('measureResult').style.display = 'none';
+  }
+});
+
+/* UI button wiring */
+document.getElementById('measureToggle').addEventListener('click', function(){
+  if (!measureActive) {
+    startMeasure();
+    this.textContent = 'Finish / Clear';
+  } else {
+    if (measureCoords.length > 0) finalizeMeasurement();
+    measureCoords = [];
+    try { if (map.getSource(measureTempId)) map.getSource(measureTempId).setData({ type:'FeatureCollection', features: [] }); } catch(e){}
+    stopMeasure();
+    document.getElementById('measureToggle').textContent = 'Measure';
+  }
+});
+
+document.getElementById('measureDist').addEventListener('click', function(){
+  measureMode = 'distance';
+  this.classList.add('active');
+  document.getElementById('measureArea').classList.remove('active');
+  if (measureActive) document.getElementById('measureIndicator').textContent = `Measure mode (${measureMode}). Click to add points. Double-click to finish.`;
+});
+
+document.getElementById('measureArea').addEventListener('click', function(){
+  measureMode = 'area';
+  this.classList.add('active');
+  document.getElementById('measureDist').classList.remove('active');
+  if (measureActive) document.getElementById('measureIndicator').textContent = `Measure mode (${measureMode}). Click to add points. Double-click to finish.`;
+});
+
+/* Export PNG (download) */
+/* Export PNG (download) */
+/* Export PNG with Information */
+function exportMapPNG() {
+  try {
+    // Wait for map to finish rendering before capturing
+    map.once('idle', function() {
+      try {
+        const mapCanvas = map.getCanvas();
+        
+        // Create a larger canvas to include map + info
+        const exportCanvas = document.createElement('canvas');
+        const ctx = exportCanvas.getContext('2d');
+        
+        // Set canvas size (map + info panel on right)
+        const infoWidth = 400;
+        const padding = 20;
+        exportCanvas.width = mapCanvas.width + infoWidth;
+        exportCanvas.height = mapCanvas.height;
+        
+        // White background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+        
+        // Draw map
+        ctx.drawImage(mapCanvas, 0, 0);
+        
+        // Draw info panel background
+        ctx.fillStyle = '#1a2332';
+        ctx.fillRect(mapCanvas.width, 0, infoWidth, exportCanvas.height);
+        
+        // Get current statistics
+        const stats = [];
+        for (let i = 1; i <= 5; i++) {
+          const el = document.getElementById('s' + i);
+          if (el && el.textContent && el.textContent !== '') {
+            stats.push(el.textContent);
+          }
+        }
+        
+        // Get selected feature info
+        const infoTitle = document.getElementById('infoTitle').textContent;
+        const infoTable = document.getElementById('infoTable');
+        const tableData = [];
+        if (infoTable) {
+          const rows = infoTable.querySelectorAll('tr');
+          rows.forEach(row => {
+            const key = row.querySelector('.key');
+            const value = row.querySelector('.value');
+            if (key && value) {
+              tableData.push({ key: key.textContent, value: value.textContent });
+            }
+          });
+        }
+        
+        // Draw info panel content
+        let yPos = padding + 10;
+        
+        // Title
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 24px Arial';
+        ctx.fillText('Cuttack CDA', mapCanvas.width + padding, yPos);
+        yPos += 30;
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '14px Arial';
+        ctx.fillText('Sector 6 Dashboard', mapCanvas.width + padding, yPos);
+        yPos += 40;
+        
+        // Date and time
+        const now = new Date();
+        ctx.font = '12px Arial';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText('Exported: ' + now.toLocaleString(), mapCanvas.width + padding, yPos);
+        yPos += 30;
+        
+
+        // Selected feature info
+        if (tableData.length > 0) {
+          yPos += 15;
+          ctx.fillStyle = '#ffd700';
+          ctx.font = 'bold 16px Arial';
+          ctx.fillText('Selected Feature:', mapCanvas.width + padding, yPos);
+          yPos += 25;
+          
+          ctx.fillStyle = '#ffd700';
+          ctx.font = 'bold 14px Arial';
+          ctx.fillText(infoTitle, mapCanvas.width + padding, yPos);
+          yPos += 25;
+          
+          ctx.font = '12px Arial';
+          tableData.forEach(item => {
+            // Key in gold
+            ctx.fillStyle = '#ffd700';
+            ctx.fillText(item.key + ':', mapCanvas.width + padding, yPos);
+            
+            // Value in white (on next line for better readability)
+            ctx.fillStyle = '#ffffff';
+            const valueText = item.value || 'N/A';
+            const maxWidth = infoWidth - (padding * 2);
+            
+            // Wrap long values
+            const words = valueText.split(' ');
+            let line = '';
+            let firstLine = true;
+            words.forEach(word => {
+              const testLine = line + word + ' ';
+              const metrics = ctx.measureText(testLine);
+              if (metrics.width > maxWidth && line !== '') {
+                ctx.fillText(line, mapCanvas.width + padding + (firstLine ? 0 : 10), yPos + (firstLine ? 15 : 0));
+                yPos += 15;
+                line = word + ' ';
+                firstLine = false;
+              } else {
+                line = testLine;
+              }
+            });
+            ctx.fillText(line, mapCanvas.width + padding + (firstLine ? 0 : 10), yPos + (firstLine ? 15 : 0));
+            yPos += 30;
+          });
+        }
+        
+        // Footer
+        yPos = exportCanvas.height - 30;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '11px Arial';
+        ctx.fillText('Cuttack Development Authority', mapCanvas.width + padding, yPos);
+        
+        // Convert to blob and download
+        exportCanvas.toBlob(function(blob) {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'cuttack_cda_map_export_' + Date.now() + '.png';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(()=> URL.revokeObjectURL(url), 1000);
+        }, 'image/png');
+        
+      } catch (err) {
+        alert('Export failed: ' + (err && err.message ? err.message : err));
+      }
+    });
+    // Trigger a render
+    map.triggerRepaint();
+  } catch (err) {
+    alert('Export failed: ' + (err && err.message ? err.message : err));
+  }
+}
+
+
+document.getElementById('exportPNG').addEventListener('click', exportMapPNG);
+
+
+/* Clean-up note: ensuring measure layers are removed when toggled off */
+map.on('remove', function() {
+  try {
+    if (map.getLayer('measure-line')) map.removeLayer('measure-line');
+    if (map.getLayer('measure-fill')) map.removeLayer('measure-fill');
+    if (map.getLayer('measure-points')) map.removeLayer('measure-points');
+    if (map.getSource(measureTempId)) map.removeSource(measureTempId);
+  } catch(e){}
+});
+</script>
+</body>
+</html>
