@@ -531,7 +531,7 @@ map.on('load', async () => {
 
     // Drone raster (guarded)
     try {
-      map.addSource('drone', { type:'raster', tiles:[ 'https://api.maptiler.com/tiles/019aa60b-4835-7f92-a8ce-411db2f3d268/{z}/{x}/{y}.webp?key=gf1oWeUNvdnVmrm4Zfeg' ], tileSize:256 });
+      map.addSource('drone', { type:'raster', tiles:[ 'https://api.maptiler.com/tiles/019aa66c-0676-7eb8-b784-7c50e8e86504/{z}/{x}/{y}.webp?key=WD8GM8DmrnGN3MwvNi8d' ], tileSize:256 });
       map.addLayer({ id:'drone', type:'raster', source:'drone', paint: { 'raster-opacity': 1 } });
       map.setLayoutProperty('drone','visibility','visible'); // hidden initially
       log('Drone raster added (visible).');
@@ -2146,4 +2146,5 @@ document.getElementById('exportPNG').addEventListener('click', exportMapPNG);
 <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBwJnprg61M8EWryIBQxT1_f3qxueLfQic&v=weekly" async defer></script>
 </body>
 </html>
+
 
